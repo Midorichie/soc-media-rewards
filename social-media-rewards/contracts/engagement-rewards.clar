@@ -1,6 +1,9 @@
 ;; Social Media Engagement Rewards Contract
 ;; This contract manages the verification and reward distribution for social media engagement
 
+;; Token trait definition
+(use-trait token-trait .token-trait.token-trait)
+
 ;; Constants
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
@@ -17,7 +20,7 @@
 ;; platform-id: string combining platform name and account ID (e.g. "twitter:username")
 (define-map account-registry
   { platform-id: (string-ascii 50) }
-  { stacks-address: principal }
+  { stacks-address: principal, platform: (string-ascii 20) }
 )
 
 ;; Map to track engagement events that have been rewarded
@@ -46,8 +49,14 @@
 (define-data-var min-verification-score uint u70) ;; Minimum score (0-100) required to validate engagement
 (define-data-var reward-multiplier uint u100) ;; Base multiplier for rewards (100 = 1x)
 (define-data-var platform-list (list 10 (string-ascii 20)) (list "twitter" "instagram" "tiktok" "facebook" "linkedin"))
+(define-data-var token-contract principal contract-owner) ;; Address of the token contract
 
 ;; Read-only Functions
+
+;; Get the current token contract
+(define-read-only (get-token-contract)
+  (var-get token-contract)
+)
 
 ;; Check if a user is registered for a platform
 (define-read-only (is-registered (platform-id (string-ascii 50)))
@@ -84,36 +93,21 @@
 ;; Public Functions
 
 ;; Register a social media account to a Stacks address
-(define-public (register-account (platform-id (string-ascii 50)))
+(define-public (register-account (platform-id (string-ascii 50)) (platform (string-ascii 20)))
   (begin
     ;; Check if already registered
     (asserts! (not (is-registered platform-id)) err-already-registered)
     
-    ;; Extract platform from platform-id to check if supported
-    (let ((platform (get platform (slice-platform-id platform-id))))
-      ;; Check if platform is supported
-      (asserts! (is-platform-supported platform) err-invalid-platform)
+    ;; Check if platform is supported
+    (asserts! (is-platform-supported platform) err-invalid-platform)
     
-      ;; Register the account
-      (map-set account-registry
-        { platform-id: platform-id }
-        { stacks-address: tx-sender }
-      )
-      
-      (ok true)
+    ;; Register the account
+    (map-set account-registry
+      { platform-id: platform-id }
+      { stacks-address: tx-sender, platform: platform }
     )
-  )
-)
-
-;; Function to slice the platform part from the platform-id
-;; For example, from "twitter:username" extract "twitter"
-(define-private (slice-platform-id (platform-id (string-ascii 50)))
-  (let ((colon-pos (index-of platform-id ":")))
-    (if (is-some colon-pos)
-      { platform: (unwrap-panic (as-max-len? (slice platform-id 0 (unwrap-panic colon-pos)) 20)), 
-        account: (unwrap-panic (as-max-len? (slice platform-id (+ (unwrap-panic colon-pos) 1) (- (len platform-id) (+ (unwrap-panic colon-pos) 1))) 30)) }
-      { platform: "", account: "" }
-    )
+    
+    (ok true)
   )
 )
 
@@ -123,7 +117,8 @@
               (platform (string-ascii 20))
               (engagement-type (string-ascii 20))
               (platform-id (string-ascii 50))
-              (verification-score uint))
+              (verification-score uint)
+              (token-contract-addr <token-trait>))
   (let (
     (reward-data (get-reward-rate platform engagement-type))
     (base-reward (get base-reward reward-data))
@@ -159,10 +154,10 @@
       ;; Update user's total rewards
       (update-user-rewards user-address reward-amount)
       
-      ;; Mint tokens to the user
-      (try! (contract-call? 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.token mint reward-amount user-address))
-      
-      (ok reward-amount)
+      ;; Mint tokens to the user using the token contract
+      (as-contract 
+        (contract-call? token-contract-addr mint reward-amount user-address)
+      )
     )
   )
 )
@@ -190,6 +185,15 @@
 )
 
 ;; Admin Functions
+
+;; Set the token contract address
+(define-public (set-token-contract (new-token-contract principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set token-contract new-token-contract)
+    (ok true)
+  )
+)
 
 ;; Set the reward rate for a specific engagement type on a platform
 (define-public (set-reward-rate (platform (string-ascii 20)) (engagement-type (string-ascii 20)) (base-reward uint))
