@@ -1,0 +1,28 @@
+[project]
+name = "social-media-rewards"
+description = "A blockchain-based reward system for social media engagement built on the Stacks blockchain"
+authors = ["Your Name <your.email@example.com>"]
+telemetry = false
+requirements = []
+cache_dir = "./.cache"
+cache_format = "SiliconPaddock"
+
+[project.cache_location]
+path = "./.cache"
+[contracts.engagement-rewards]
+path = "contracts/engagement-rewards.clar"
+depends_on = ["token"]
+
+[contracts.token]
+path = "contracts/token.clar"
+depends_on = []
+
+[notebooks]
+[repl.analysis]
+passes = ["check_checker"]
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
